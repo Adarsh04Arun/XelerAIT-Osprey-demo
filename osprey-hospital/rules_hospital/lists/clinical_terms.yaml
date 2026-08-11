@@ -1,0 +1,57 @@
+# Phrases that indicate clinical content rather than operational content.
+#
+# Matched case-insensitively as substrings against the agent's reply and
+# against free text the agent tries to persist. See
+# plugins_hospital/src/udfs/hospital/text.py (PhraseListMatch).
+#
+# This is deliberately a blunt instrument. For an MVP a keyword list makes the
+# guardrail legible and debuggable -- when a turn is blocked you can see the
+# exact phrase that did it. A production system would put a classifier here
+# and keep the list as a cheap pre-filter.
+
+# Diagnosis and assessment
+- "you likely have"
+- "you probably have"
+- "it sounds like you have"
+- "that sounds like"
+- "this is likely"
+- "diagnosis"
+- "diagnosed with"
+- "you may be suffering from"
+- "symptoms suggest"
+- "consistent with"
+- "differential"
+- "prognosis"
+
+# Triage and severity judgements
+- "not serious"
+- "nothing to worry about"
+- "no need to worry"
+- "you should be fine"
+- "it's probably fine"
+- "sounds mild"
+- "sounds serious"
+- "you don't need to see"
+- "you don't need to be seen"
+- "wait and see"
+- "monitor it at home"
+
+# Treatment guidance
+- "you should try"
+- "i recommend taking"
+- "i suggest taking"
+- "apply ice"
+- "apply heat"
+- "rest and fluids"
+- "drink plenty of fluids"
+- "home remedy"
+- "treatment for"
+- "how to treat"
+
+# Interpreting results
+- "your results show"
+- "your test shows"
+- "your lab"
+- "normal range"
+- "elevated levels"
+- "your blood pressure is"

@@ -1,0 +1,81 @@
+# Self-harm and suicidal ideation.
+#
+# Held SEPARATELY from urgent_terms.yaml, and treated differently by the rules,
+# because this category is not a medical-urgency variant -- it needs a different
+# response, a different escalation priority, and it must not be satisfiable by
+# the agent politely deferring.
+#
+# Why this file exists: a real session said "i want to die" and the ruleset
+# recorded the turn as CLEAN. The urgent list had "kill myself", "end my life"
+# and "suicidal" but not the single most common phrasing, so nothing fired and
+# no human was notified. The only thing that produced a safe response was the
+# model's own judgement -- exactly the dependency this system exists to remove.
+#
+# Tuned to over-trigger, heavily. A false positive costs a member of staff a
+# short conversation. A false negative is not recoverable.
+#
+# IMPORTANT: substring matching is the wrong primitive for this category and
+# this list should be treated as a floor, not a solution. Someone expressing
+# distress obliquely ("what's the point anymore", "everyone would be better off")
+# will not always be caught by keywords. A production system needs an intent
+# classifier here; keep the list as a cheap high-recall pre-filter in front of it.
+
+# Direct statements of wanting to die
+- "want to die"
+- "wanna die"
+- "wish i was dead"
+- "wish i were dead"
+- "wish i was never born"
+- "rather be dead"
+- "better off dead"
+- "ready to die"
+- "going to die tonight"
+
+# Suicide, explicit
+- "kill myself"
+- "killing myself"
+- "end my life"
+- "ending my life"
+- "take my own life"
+- "commit suicide"
+- "suicide"
+- "suicidal"
+- "end it all"
+- "end things"
+- "not be here anymore"
+- "not want to be here"
+- "don't want to be here"
+- "dont want to be here"
+- "don't want to live"
+- "dont want to live"
+- "can't go on"
+- "cant go on"
+- "can't do this anymore"
+- "cant do this anymore"
+- "no reason to live"
+- "no point in living"
+- "what's the point anymore"
+- "whats the point anymore"
+
+# Self-injury
+- "hurt myself"
+- "harm myself"
+- "hurting myself"
+- "self harm"
+- "self-harm"
+- "cut myself"
+- "cutting myself"
+
+# Overdose / means
+- "overdose"
+- "od'd"
+- "took too many"
+- "took all my"
+- "swallowed a bottle"
+- "whole bottle of"
+
+# Others at risk
+- "better off without me"
+- "everyone would be better off"
+- "burden to everyone"
+- "no one would miss me"

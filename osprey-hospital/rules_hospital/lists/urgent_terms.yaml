@@ -1,0 +1,78 @@
+# Language that must remove the turn from the agent entirely and route to a
+# human immediately. See rules/message/urgent_triage.sml.
+#
+# Tuned to over-trigger on purpose. A false escalation costs a receptionist
+# thirty seconds; a missed one is a different category of problem altogether.
+
+# Cardiac / respiratory
+- "chest pain"
+- "chest tightness"
+- "pain in my chest"
+- "can't breathe"
+- "cannot breathe"
+- "trouble breathing"
+- "difficulty breathing"
+- "short of breath"
+- "shortness of breath"
+# "struggling to breathe" was missed by the original list and let a genuine
+# respiratory-distress message through -- caught by test_urgent_symptoms_escalate.
+# Keyword lists fail this way constantly; the lesson is to cover the phrasings
+# patients actually use, not the ones clinical documentation uses.
+- "struggling to breathe"
+- "struggling for breath"
+- "hard to breathe"
+- "can barely breathe"
+- "cant breathe"
+- "breathless"
+- "gasping"
+- "choking"
+
+# Neurological
+- "stroke"
+- "face is drooping"
+- "slurred speech"
+- "can't move my"
+- "cannot move my"
+- "numbness on one side"
+- "worst headache"
+- "sudden headache"
+- "seizure"
+- "convulsing"
+- "passed out"
+- "fainted"
+- "unconscious"
+- "unresponsive"
+
+# Bleeding / trauma
+- "bleeding heavily"
+- "won't stop bleeding"
+- "will not stop bleeding"
+- "coughing up blood"
+- "vomiting blood"
+- "broken bone"
+- "head injury"
+- "severe burn"
+
+# Obstetric
+- "water broke"
+- "waters broke"
+- "my water broke"
+- "contractions"
+- "baby is not moving"
+- "baby isn't moving"
+- "baby hasn't moved"
+
+# NOTE: self-harm and suicidal ideation used to live here. They now have their
+# own list (lists/self_harm_terms.yaml) and their own rule, because they need a
+# different response and a higher escalation priority than a medical emergency
+# -- and because burying them among sixty symptom keywords is how "i want to
+# die" came to be missed entirely. Do not move them back.
+
+# Explicit emergency framing
+- "emergency"
+- "ambulance"
+- "call 911"
+- "call 999"
+- "call 112"
+- "urgent care now"
+- "it's an emergency"

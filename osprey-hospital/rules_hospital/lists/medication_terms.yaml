@@ -1,0 +1,48 @@
+# Medication and dosage language. Always out of scope for an operational agent,
+# even when hedged -- see rules/message/clinical_scope.sml MedicationAdviceRule.
+
+# Dosage instruction shapes
+- "take two"
+- "take 2"
+- "take one"
+- "take a couple of"
+- "twice a day"
+- "three times a day"
+- "every four hours"
+- "every 4 hours"
+- "every six hours"
+- "every 6 hours"
+- "every eight hours"
+- "with food"
+- "on an empty stomach"
+- "mg of"
+- "milligrams"
+- "dosage"
+- "dose of"
+- "double the dose"
+- "stop taking"
+- "keep taking"
+- "increase your"
+- "reduce your"
+
+# Common OTC / prescription names an agent might volunteer
+- "ibuprofen"
+- "paracetamol"
+- "acetaminophen"
+- "aspirin"
+- "tylenol"
+- "advil"
+- "antibiotic"
+- "antibiotics"
+- "painkiller"
+- "painkillers"
+- "antihistamine"
+- "steroid"
+- "inhaler"
+- "insulin"
+
+# Prescription actions
+- "prescribe"
+- "prescription for"
+- "refill your"
+- "i can refill"

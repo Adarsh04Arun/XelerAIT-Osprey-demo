@@ -1,0 +1,40 @@
+# Osprey worker + the hospital plugin.
+#
+# Built on top of the stock osprey-worker image rather than forking it. The
+# plugin is installed with --no-deps into the existing venv, so uv.lock is never
+# touched and the base image stays exactly as upstream ships it. That is why
+# plugins_hospital has no real dependencies: everything it imports
+# (kafka-python, pyyaml, pluggy) is already in the image.
+#
+# Two things here are load-bearing and were arrived at the hard way:
+#
+#   1. `uv pip install`, NOT `pip install`. The venv at /osprey/.venv was created
+#      by uv and contains no pip, so plain `pip` silently resolves to the SYSTEM
+#      python and installs somewhere the worker never looks. It reports success
+#      and the plugin simply never loads.
+#
+#   2. No import check here. `osprey` is not importable in a bare shell in this
+#      image -- the base Dockerfile runs `uv sync` before ADDing the real source,
+#      so osprey_worker's editable finder is written with an empty MAPPING. It is
+#      `uv run` in entrypoint.sh that re-syncs and repairs it at container start.
+#      So we verify the ENTRY POINT is registered, which is what Osprey's plugin
+#      manager actually reads, and leave importing to runtime.
+#
+# Corollary of (2): do NOT set UV_NO_SYNC=1 on this container. Skipping the sync
+# leaves the empty MAPPING in place and the worker cannot import osprey at all.
+# The sync does not remove the plugin -- verified.
+ARG OSPREY_WORKER_IMAGE=osprey-worker:local
+FROM ${OSPREY_WORKER_IMAGE}
+
+COPY osprey-hospital/plugins_hospital /osprey/plugins_hospital
+
+ENV VIRTUAL_ENV=/osprey/.venv
+
+# --no-deps: everything needed is already installed, and resolving here risks
+# pulling an incompatible version into the worker's venv.
+RUN uv pip install --no-deps -e /osprey/plugins_hospital && \
+    /osprey/.venv/bin/python -c "\
+from importlib.metadata import entry_points; \
+names = sorted(e.name for e in entry_points(group='osprey_plugin')); \
+assert 'hospital_plugins' in names, f'hospital plugin entry point missing: {names}'; \
+print('osprey_plugin entry points:', names)"

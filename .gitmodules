@@ -1,0 +1,3 @@
+[submodule "osprey-atproto"]
+	path = osprey-atproto
+	url = git@github.com:bluesky-social/osprey-atproto.git

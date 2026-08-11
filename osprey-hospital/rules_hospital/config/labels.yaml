@@ -1,0 +1,42 @@
+# Label definitions.
+#
+# Osprey requires at least one file under config/ or the ruleset fails to load
+# with "sources can not be empty" -- an easy thing to trip over when starting a
+# ruleset from scratch.
+#
+# The blocking guardrails in this MVP work through DeclareVerdict rather than
+# labels, because a verdict is what the gateway can synchronously act on. These
+# labels are the persistent, cross-session counterpart: a verdict decides one
+# action, a label describes an ongoing state of an entity.
+#
+# They are declared but not yet applied. Wiring them up means adding
+# LabelAdd(entity=..., label=...) to a WhenRules block -- the Postgres-backed
+# labels provider from example_plugins is already registered and running.
+labels:
+  repeat-scope-violation:
+    valid_for: [Session]
+    connotation: negative
+    description: >
+      Session has repeatedly pushed the agent toward clinical territory.
+      Useful for deciding when to hand the whole conversation to a human
+      rather than blocking turn by turn.
+
+  schedule-abuser:
+    valid_for: [Session, Actor]
+    connotation: negative
+    description: >
+      Session has tripped booking rate limits or churned the schedule.
+
+  urgent-triage-raised:
+    valid_for: [Session, Actor]
+    connotation: neutral
+    description: >
+      An urgent symptom was raised in this session and escalated to a human.
+      Neutral rather than negative -- this describes the patient's situation,
+      not their behaviour, and must never be treated as a black mark.
+
+  identity-unverified:
+    valid_for: [Session]
+    connotation: neutral
+    description: >
+      Session has attempted record access without verified identity.

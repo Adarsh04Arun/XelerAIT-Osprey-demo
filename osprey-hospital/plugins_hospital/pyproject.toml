@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plugins_hospital"
+version = "0.1.0"
+description = "Osprey plugins for the hospital operations agent guardrails"
+requires-python = ">=3.11"
+
+# Intentionally minimal. Everything listed here is already present in the
+# osprey-worker image, so this package installs with --no-deps and never
+# touches the uv lockfile. Adding a dependency that ISN'T already in the image
+# means rebuilding the base image, so prefer the stdlib.
+dependencies = [
+    "pluggy==1.5.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+# hospital_register_plugins is a loose top-level module, not a package, so
+# packages.find below will not pick it up -- it has to be declared explicitly
+# or the entry point resolves to nothing and the plugin silently never loads.
+py-modules = ["hospital_register_plugins"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# This is what makes Osprey's plugin manager find us --
+# plugin_manager.load_setuptools_entrypoints('osprey_adaptor') reads this group.
+#
+# The module is `hospital_register_plugins`, NOT `register_plugins`:
+# example_plugins already installs a top-level module by that name and the two
+# would collide on sys.path. Same reason the packages are hospital_udfs /
+# hospital_sinks rather than udfs / output_sinks.
+[project.entry-points.osprey_plugin]
+hospital_plugins = "hospital_register_plugins"

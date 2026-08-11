@@ -1,0 +1,95 @@
+# Hospital agent stacked on top of the main Osprey compose file.
+#
+#   docker compose -f docker-compose.yaml -f osprey-hospital/docker-compose.hospital.yaml up
+#
+# or use osprey-hospital/run.sh, which builds the base worker image first.
+#
+# What this override changes:
+#   * points the worker and UI API at rules_hospital instead of example_rules
+#   * rebuilds the worker from Dockerfile.worker so the hospital plugin is installed
+#   * adds the verdict topic the gateway blocks on
+#   * adds the gateway + ollama-facing service
+
+services:
+  osprey-worker:
+    build:
+      context: .
+      dockerfile: osprey-hospital/Dockerfile.worker
+      args:
+        # Built by run.sh from the stock osprey_worker/Dockerfile.
+        OSPREY_WORKER_IMAGE: osprey-worker:local
+    environment:
+      # Load the hospital ruleset. The path is also read by the PhraseListMatch
+      # UDF to find lists/, so it must point at the ruleset root.
+      OSPREY_RULES_PATH: /osprey/rules_hospital
+      # Where the verdict sink publishes. The gateway consumes this.
+      HOSPITAL_VERDICT_TOPIC: hospital.verdicts
+      HOSPITAL_VERDICT_CLIENT_ID: hospital-worker
+      # The in-process IncrementWindow store is per-process; more than one
+      # worker would multiply every rate limit. See plugins_hospital window.py.
+      OSPREY_RULES_SINK_NUM_WORKERS: 1
+    volumes:
+      # Mounted rather than baked so you can edit a rule and restart the worker
+      # instead of rebuilding the image.
+      - ./osprey-hospital/rules_hospital:/osprey/rules_hospital
+      - ./osprey-hospital/plugins_hospital:/osprey/plugins_hospital
+
+  osprey-ui-api:
+    environment:
+      OSPREY_RULES_PATH: /osprey/rules_hospital
+    volumes:
+      - ./osprey-hospital/rules_hospital:/osprey/rules_hospital
+
+  # Nothing outside the compose network talks to Postgres, and publishing 5432
+  # collides with a local Postgres or (on Windows) with a Hyper-V reserved port
+  # range, which fails as "socket access forbidden". Drop the host binding.
+  # `!override` replaces the base file's list instead of appending to it.
+  postgres:
+    ports: !override []
+
+  # Create the verdict topic up front. Without this the gateway's consumer
+  # starts on a topic that doesn't exist yet and misses the first verdicts,
+  # which shows up as a mystifying timeout on the very first request.
+  hospital-topic-creator:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      osprey-kafka:
+        condition: service_healthy
+    entrypoint: ['/bin/bash', '-c']
+    command:
+      - |
+        kafka-topics --bootstrap-server osprey-kafka:29092 \
+          --create --if-not-exists --topic hospital.verdicts \
+          --partitions 3 --replication-factor 1
+        echo "hospital.verdicts ready"
+
+  hospital-gateway:
+    container_name: hospital-gateway
+    build:
+      context: .
+      dockerfile: osprey-hospital/gateway/Dockerfile
+    depends_on:
+      osprey-kafka:
+        condition: service_healthy
+      hospital-topic-creator:
+        condition: service_completed_successfully
+    ports:
+      # Host 8090 rather than 8080: 8080 is a common default and is frequently
+      # already taken on a dev machine. Container port stays 8080.
+      - '127.0.0.1:8090:8080'
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: osprey-kafka:29092
+      OSPREY_ACTIONS_TOPIC: osprey.actions_input
+      HOSPITAL_VERDICT_TOPIC: hospital.verdicts
+      # Ollama runs on the host, not in compose.
+      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_MODEL: llama3.1:latest
+      HOSPITAL_VERDICT_TIMEOUT: '8.0'
+      # Never flip this to true outside a demo -- it lets the agent act
+      # unsupervised whenever the rules pipeline is down.
+      HOSPITAL_FAIL_OPEN: 'false'
+      LOG_LEVEL: INFO
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - ./osprey-hospital/gateway:/srv/gateway

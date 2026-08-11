@@ -1,0 +1,38 @@
+# Evidence the agent stayed in its lane -- it acknowledged a clinical topic and
+# handed it to someone qualified instead of answering.
+#
+# Used by rules/message/clinical_scope.sml to distinguish "the agent gave
+# medical advice" from "the agent correctly declined to". Without this, every
+# turn where a patient mentions a symptom would trip the clinical rules.
+
+- "i'm not able to advise"
+- "i am not able to advise"
+- "i can't advise"
+- "i cannot advise"
+- "i'm not able to help with medical"
+- "not able to give medical advice"
+- "can't give medical advice"
+- "cannot give medical advice"
+- "i'm not qualified"
+- "i am not qualified"
+- "that's a question for"
+- "that is a question for"
+- "speak to a doctor"
+- "speak with a doctor"
+- "speak to a clinician"
+- "speak to a nurse"
+- "talk to your doctor"
+- "check with your doctor"
+- "discuss with your doctor"
+- "your care team"
+- "a member of clinical staff"
+- "clinical staff"
+- "i'll connect you"
+- "i will connect you"
+- "let me put you through"
+- "transferring you"
+- "i can book you an appointment"
+- "i can help you book"
+- "i can only help with"
+- "i can help with scheduling"
+- "only help with appointments"
