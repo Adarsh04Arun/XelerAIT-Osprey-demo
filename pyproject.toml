@@ -69,7 +69,7 @@ common = [
     "tenacity==8.1.0",
     "tink==1.9.0",
     "tld==0.12.7",
-    "traitlets==5.14.3",
+    "traitlets==5.16.1",
     "typing-extensions==4.12.2",
     "typing-inspect==0.9.0",
     "anyascii==0.3.3",
