@@ -99,7 +99,7 @@ common = [
     { name = "types-markupsafe", specifier = "==1.1.10" },
     { name = "types-maxminddb", specifier = "==1.5.0" },
     { name = "types-protobuf", specifier = "==4.24.0.1" },
-    { name = "types-psycopg2", specifier = ">=2.9.21.20250809" },
+    { name = "types-psycopg2", specifier = ">=2.9.21.20260724" },
     { name = "types-python-dateutil", specifier = "==2.9.0.20260518" },
     { name = "types-pytz", specifier = "==2025.2.0.20250516" },
     { name = "types-pyyaml", specifier = "==6.0.12.20250516" },
@@ -2590,11 +2590,11 @@ wheels = [
 
 [[package]]
 name = "types-psycopg2"
-version = "2.9.21.20260518"
+version = "2.9.21.20260724"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3e/46/61f27369bd1426ea718f759249a5160463522ace6325bcfcbb846305646d/types_psycopg2-2.9.21.20260518.tar.gz", hash = "sha256:8b1f80d90d6799a4fcdac12198b382a8feee9ed4340d5f69b56fc5ffa0644143", size = 27241, upload-time = "2026-05-18T06:01:42.167Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/29/09ca8f0ad16105193deabcaf8256059e361e9e37ff24551efd9c739e240b/types_psycopg2-2.9.21.20260724.tar.gz", hash = "sha256:db31031c37de823a2b21c787cb84832174fdda2a99a8b1af648206f19cc32f8c", size = 27644, upload-time = "2026-07-24T04:57:36.61Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/87/41f48317ec5fea2cc9e881547600f40bcf9021f2b63183d9b0705d0aa72b/types_psycopg2-2.9.21.20260518-py3-none-any.whl", hash = "sha256:2fd728a4fa3860db0a4a9813e5f49c30ed329b3d2e60e73530d9db01b2b98420", size = 24955, upload-time = "2026-05-18T06:01:40.764Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/90/1e77eb76030bb5feb249ecb41cd7647c6ae831ec7bd2b61a61beecac4029/types_psycopg2-2.9.21.20260724-py3-none-any.whl", hash = "sha256:4f87890dd06cea99e3bb0536330ffc2a7320e69059dc1ee0e2c884ef2718f2b4", size = 24964, upload-time = "2026-07-24T04:57:35.703Z" },
 ]
 
 [[package]]
