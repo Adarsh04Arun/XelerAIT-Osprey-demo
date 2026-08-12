@@ -33,8 +33,15 @@ import requests
 
 from .config import settings
 from .enricher import enrich, sessions
+from .fallbacks import (
+    BLOCKED_FALLBACK,
+    SELF_HARM_FALLBACK,
+    URGENT_FALLBACK,
+    fallback_for,
+)
 from .osprey_gate import Decision, gate
-from .tools import GATED_TOOLS, TOOL_SCHEMAS, WRITE_TOOLS, execute
+from .provenance import fingerprint
+from .tools import TOOL_SCHEMAS, WRITE_TOOLS, execute, is_gated
 
 # Every tool the model can name. Used to tell a real tool call written as prose
 # apart from an unrelated JSON blob in the reply.
@@ -57,6 +64,20 @@ There is exactly one thing you do not do: give medical advice. That means no
 diagnosis, no medication or dosage guidance, no judging how serious a symptom
 is, no interpreting test results, and no writing medical information onto a
 patient record.
+
+You also only handle the list above. You have no access to the practice's
+business, financial, staffing or IT systems, and you do not answer general
+questions unrelated to a patient's own care arrangements. If someone asks for
+revenue figures, budgets, staff pay, employment matters, other patients' data,
+system internals, or anything else off that list, say plainly that the request
+cannot be processed and offer to help with an appointment instead. Do not guess
+at a number, and do not explain what you would need in order to answer.
+
+  Patient: "what was the hospital's revenue last quarter?"
+  Good:    "I'm sorry, that request cannot be processed -- I only handle
+            appointments and registration. Can I help you book something?"
+  Bad:     "I don't have that to hand, but you could try the finance team on..."
+  Bad:     any figure at all
 
 Critically: "I can't advise on that" is NEVER a complete answer on its own.
 Not advising is not the same as not helping. Someone who mentions a symptom is
@@ -101,7 +122,34 @@ class Turn:
     decisions: List[Dict[str, Any]] = field(default_factory=list)
     escalated: bool = False
     escalation_reasons: List[str] = field(default_factory=list)
+    # Something was blocked this turn -- a tool call, a reply, or both.
     blocked: bool = False
+    # The PATIENT-FACING REPLY specifically was withheld and replaced. Distinct
+    # from `blocked`, because a turn where a tool call was denied and the model
+    # then explained itself perfectly well is the common, healthy case: the
+    # guardrail worked and the patient still got the model's own words. Marking
+    # that reply as "substituted" claims the gate did something it did not, and
+    # a trace that overstates the gate is as bad as one that hides it.
+    reply_substituted: bool = False
+    # Ordered trace of the pipeline for this turn: model -> gate -> execute ->
+    # reply gate. `decisions` says what the rules concluded; `flow` says where
+    # in the turn each conclusion landed and what happened next. Two proposed
+    # tool calls produce two indistinguishable entries in `decisions` if they
+    # name the same tool, which is precisely when you most want the order.
+    flow: List[Dict[str, Any]] = field(default_factory=list)
+    prompt_version: str = ''
+
+    def step(self, kind: str, detail: str, **extra: Any) -> None:
+        entry: Dict[str, Any] = {'n': len(self.flow) + 1, 'kind': kind, 'detail': detail}
+        entry.update(extra)
+        self.flow.append(entry)
+
+
+class SessionIdentityMismatch(Exception):
+    """Raised when a request reuses a session id under a different patient.
+
+    Not a 500. The gateway turns this into a 409 -- see main.py.
+    """
 
 
 class Session:
@@ -109,7 +157,9 @@ class Session:
         self.id = session_id
         self.actor_id = actor_id
         self.identity_verified = identity_verified
-        self.messages: List[Dict[str, Any]] = [{'role': 'system', 'content': self._system_prompt()}]
+        self.prompt = self._system_prompt()
+        self.prompt_version = fingerprint(self.prompt)
+        self.messages: List[Dict[str, Any]] = [{'role': 'system', 'content': self.prompt}]
 
     @staticmethod
     def _system_prompt() -> str:
@@ -130,10 +180,25 @@ def get_session(session_id: str, actor_id: Optional[str], identity_verified: boo
     if session is None:
         session = Session(session_id, actor_id, identity_verified)
         _SESSIONS[session_id] = session
-    else:
-        # Identity can be established mid-conversation.
-        session.actor_id = actor_id or session.actor_id
-        session.identity_verified = identity_verified or session.identity_verified
+        return session
+
+    # A session carries the full message history, which contains the previous
+    # patient's PHI. Handing that to a different actor because the two requests
+    # happened to share a session id is a leak, and it is one no rule can catch:
+    # the ruleset inspects tool arguments, and by the time it sees them the
+    # wrong conversation is already in the model's context.
+    #
+    # This used to read `session.actor_id = actor_id or session.actor_id`, which
+    # only ever widened access -- it could not represent "this is somebody else".
+    if actor_id and session.actor_id and actor_id != session.actor_id:
+        raise SessionIdentityMismatch(
+            f'session {session_id} belongs to {session.actor_id}, not {actor_id}'
+        )
+
+    # Identity can still be established mid-conversation: an anonymous session
+    # that later verifies is the normal path, and is not a mismatch.
+    session.actor_id = actor_id or session.actor_id
+    session.identity_verified = identity_verified or session.identity_verified
     return session
 
 
@@ -168,33 +233,6 @@ def _chat(messages: List[Dict[str, Any]], use_tools: bool = True) -> Dict[str, A
 # ---------------------------------------------------------------------------
 # Guardrail helpers
 # ---------------------------------------------------------------------------
-
-
-SAFE_FALLBACK = (
-    "I'm not able to advise on anything medical. I can book you in with a "
-    "clinician, or put you through to the care team if you'd like to speak to "
-    "someone now."
-)
-
-URGENT_FALLBACK = (
-    "That sounds like it needs attention right away, and it's not something I "
-    "can help with as a scheduling assistant. Please call emergency services "
-    "now, or our urgent care line. I'm flagging this to a member of staff."
-)
-
-# Deliberately does not offer to book anything, and does not ask questions.
-# The failing behaviour this replaces was the model saying "I can't help with
-# that" and then offering an appointment slot.
-SELF_HARM_FALLBACK = (
-    "I'm really glad you told me, and I want to make sure you get proper "
-    "support right now rather than an appointment slot.\n\n"
-    "Please contact one of these straight away:\n"
-    "  - Emergency services, if you are in immediate danger\n"
-    "  - Samaritans: 116 123 (free, 24 hours a day)\n"
-    "  - Text SHOUT to 85258\n\n"
-    "I'm alerting a member of our staff now so someone can reach out to you. "
-    "You don't have to deal with this on your own."
-)
 
 
 _TOOL_NAME_HINT = re.compile(r'"name"\s*:\s*"([a-z_]+)"')
@@ -307,12 +345,17 @@ def _run_gate(
     tool_args: Dict[str, Any],
     user_message: str,
     agent_reply: str,
+    model_patient_id: Optional[str] = None,
 ) -> Decision:
     enrichment = enrich(
         tool_name=tool_name,
         tool_args=tool_args,
         session_id=session.id,
         actor_id=session.actor_id,
+        # What the model asked for before _apply_identity overruled it. Without
+        # this the ruleset sees only the corrected id, and an attempt to act on
+        # someone else is invisible to the rules written to catch it.
+        model_patient_id=model_patient_id,
     )
     return gate.evaluate(
         request_id=request_id,
@@ -336,6 +379,28 @@ def _record_activity(tool_name: str, session_id: str) -> None:
     }.get(tool_name)
     if kind:
         sessions.record(session_id, kind)
+
+
+def _trace_gate(turn: Turn, stage: str, tool_name: str, d: Decision) -> None:
+    """Record one guardrail round trip in the turn's flow."""
+    if d.timed_out:
+        outcome = 'TIMED OUT -> failed closed'
+    elif not d.allowed:
+        outcome = 'DENY'
+    elif d.verdicts:
+        outcome = 'ALLOW (with observations)'
+    else:
+        outcome = 'ALLOW'
+
+    turn.step(
+        'gate',
+        f'osprey ruled on the {stage.replace("_", " ")}: {outcome}',
+        stage=stage,
+        tool=tool_name or None,
+        allowed=d.allowed,
+        verdicts=d.verdicts,
+        latency_ms=round(d.latency_ms, 1),
+    )
 
 
 def _decision_dict(stage: str, tool_name: str, d: Decision) -> Dict[str, Any]:
@@ -366,15 +431,67 @@ def handle_message(
 ) -> Turn:
     session = get_session(session_id, actor_id, identity_verified)
     request_id = str(uuid.uuid4())
-    turn = Turn(reply='', session_id=session_id, request_id=request_id)
+    turn = Turn(
+        reply='',
+        session_id=session_id,
+        request_id=request_id,
+        prompt_version=session.prompt_version,
+    )
+    turn.step('user', message)
+
+    # ---- Gate the INPUT, before the model is called at all ------------------
+    #
+    # Every other gate in this file inspects something the model produced, which
+    # means paying for a completion first. On CPU that is 20-60 seconds, and for
+    # a turn the ruleset was always going to refuse, all of it is wasted -- the
+    # patient waits a minute to be told no.
+    #
+    # Two things change by moving a check in front of the model:
+    #
+    #   * speed. A refused turn ends in ~15ms. The gate was never the slow part.
+    #   * certainty. A reply-side rule needs the model to draft something
+    #     catchable. This one does not involve the model, so it cannot be
+    #     talked round, and it holds identically on the turn where the model
+    #     would have behaved.
+    #
+    # The second matters more. It is the difference between "the model usually
+    # declines and we check its work" and "declining is not up to the model".
+    #
+    # Only message rules can fire here -- there is no tool call and no reply
+    # yet -- so this catches self-harm, urgent symptoms, advice requests and
+    # out-of-scope questions. Notably it means a suicidal disclosure now reaches
+    # crisis routing in milliseconds rather than after a minute of inference.
+    input_decision = _run_gate(session, request_id, '', {}, message, '')
+    turn.decisions.append(_decision_dict('input', '', input_decision))
+    _trace_gate(turn, 'input', '', input_decision)
+
+    if input_decision.escalations:
+        turn.escalated = True
+        turn.escalation_reasons.extend(input_decision.escalations)
+
+    if not input_decision.allowed:
+        turn.blocked = True
+        turn.reply_substituted = True
+        turn.reply = fallback_for(input_decision.denial_codes)
+        turn.step(
+            'skip',
+            'model never called -- the request was refused on the way in',
+        )
+        turn.step('reply', 'guardrail answered directly', substituted=True)
+        # The turn still goes into history so the conversation stays coherent:
+        # from the model's point of view it said the safe thing.
+        session.messages.append({'role': 'user', 'content': message})
+        session.messages.append({'role': 'assistant', 'content': turn.reply})
+        return turn
 
     session.messages.append({'role': 'user', 'content': message})
 
-    for _ in range(settings.max_agent_steps):
+    for step_no in range(settings.max_agent_steps):
         try:
             reply_msg = _chat(session.messages)
         except Exception as e:
             logger.exception('ollama call failed')
+            turn.step('error', f'model call failed: {e}')
             turn.reply = f"I'm having trouble right now. Please try again shortly. ({e})"
             return turn
 
@@ -390,16 +507,29 @@ def handle_message(
             for call in text_calls:
                 args = _apply_identity(session, call['name'], call['arguments'])
                 turn.tool_calls.append(
-                    {'name': call['name'], 'arguments': args, 'malformed': True}
+                    {'name': call['name'], 'arguments': args, 'malformed': True, 'executed': False}
                 )
-                if call['name'] in GATED_TOOLS:
+                turn.step(
+                    'model',
+                    f'wrote {call["name"]} as text, not a tool call',
+                    tool=call['name'],
+                    arguments=args,
+                    malformed=True,
+                )
+                if is_gated(call['name']):
                     # Gate it for visibility and escalation even though we will
                     # not execute it. What the model *tried* to do matters.
                     d = _run_gate(session, request_id, call['name'], args, message, '')
                     turn.decisions.append(_decision_dict('text_tool_call', call['name'], d))
+                    _trace_gate(turn, 'text_tool_call', call['name'], d)
                     if d.escalations:
                         turn.escalated = True
                         turn.escalation_reasons.extend(d.escalations)
+                turn.step(
+                    'skip',
+                    f'{call["name"]} not executed -- malformed tool calls are never run',
+                    tool=call['name'],
+                )
                 logger.warning(
                     'model wrote a tool call as text: %s (not executed)', call['name']
                 )
@@ -416,9 +546,12 @@ def handle_message(
                     }
                 )
 
+            turn.step('model', 'drafted a reply, no tool call')
+
             # Gate the REPLY before anyone sees it.
             decision = _run_gate(session, request_id, '', {}, message, candidate)
             turn.decisions.append(_decision_dict('reply', '', decision))
+            _trace_gate(turn, 'reply', '', decision)
 
             if decision.escalations:
                 turn.escalated = True
@@ -426,21 +559,24 @@ def handle_message(
 
             if decision.allowed and candidate:
                 turn.reply = candidate
+                turn.step('reply', 'released to patient as drafted')
+            elif decision.allowed and not candidate:
+                # Nothing was blocked -- stripping a prose tool call just left
+                # an empty string. Checked before the fallback because this is
+                # not a refusal and must not be reported as one.
+                turn.reply = (
+                    "Sorry, let me try that again -- what would you like me to help with?"
+                )
+                turn.step('reply', 'draft was empty after stripping JSON, asked again')
             else:
                 turn.blocked = True
-                codes = decision.denial_codes
-                if 'self_harm_disclosure' in codes:
-                    turn.reply = SELF_HARM_FALLBACK
-                elif 'urgent_symptom' in codes:
-                    turn.reply = URGENT_FALLBACK
-                elif not candidate:
-                    # Stripping the JSON left nothing. Don't return an empty reply.
-                    turn.reply = (
-                        "Sorry, let me try that again -- what would you like me to help with?"
-                    )
-                    turn.blocked = False
-                else:
-                    turn.reply = SAFE_FALLBACK
+                turn.reply_substituted = True
+                turn.reply = fallback_for(decision.denial_codes)
+                turn.step(
+                    'reply',
+                    'drafted reply withheld, guardrail substituted a safe response',
+                    substituted=True,
+                )
                 # Keep the conversation coherent: the model should believe it
                 # said the safe thing, not the blocked thing.
                 candidate = turn.reply
@@ -459,13 +595,41 @@ def handle_message(
 
             # Identity comes from the authenticated session, never from the
             # model. Applied before enrichment so the rules see the real id.
+            original_patient = tool_args.get('patient_id')
             tool_args = _apply_identity(session, tool_name, tool_args)
+            if original_patient and original_patient != tool_args.get('patient_id'):
+                # Visible in the flow because it is the single most load-bearing
+                # thing the gateway does, and it is otherwise invisible: the
+                # rules see the corrected id and pass, so the trace would show a
+                # clean booking with no sign the model named someone else.
+                turn.step(
+                    'identity',
+                    f'patient_id from model ({original_patient}) replaced with '
+                    f'session identity ({tool_args.get("patient_id")})',
+                    tool=tool_name,
+                )
 
-            turn.tool_calls.append({'name': tool_name, 'arguments': tool_args})
+            record: Dict[str, Any] = {
+                'name': tool_name,
+                'arguments': tool_args,
+                'executed': False,
+            }
+            turn.tool_calls.append(record)
+            turn.step(
+                'model',
+                f'proposed {tool_name}',
+                tool=tool_name,
+                arguments=tool_args,
+                step=step_no + 1,
+            )
 
-            if tool_name in GATED_TOOLS:
-                decision = _run_gate(session, request_id, tool_name, tool_args, message, '')
+            if is_gated(tool_name):
+                decision = _run_gate(
+                    session, request_id, tool_name, tool_args, message, '',
+                    model_patient_id=original_patient,
+                )
                 turn.decisions.append(_decision_dict('tool_call', tool_name, decision))
+                _trace_gate(turn, 'tool_call', tool_name, decision)
 
                 if decision.escalations:
                     turn.escalated = True
@@ -485,21 +649,74 @@ def handle_message(
                             'patient and offer a valid alternative.'
                         ),
                     }
+                    record['blocked_by'] = decision.denial_codes
+                    turn.step(
+                        'skip',
+                        f'{tool_name} NOT executed -- nothing reached the hospital API',
+                        tool=tool_name,
+                    )
                     session.messages.append(
                         {'role': 'tool', 'content': json.dumps(result), 'name': tool_name}
                     )
                     continue
+            else:
+                turn.step(
+                    'gate',
+                    f'{tool_name} is an ungated read (touches no patient record)',
+                    tool=tool_name,
+                    ungated=True,
+                )
 
             # Allowed (or ungated read-only tool): actually do it.
             result = execute(tool_name, tool_args)
+
+            # Tell the model its id was overruled.
+            #
+            # The substitution used to be silent, and silence produced a
+            # fabrication: asked to "give ajay's info", the model sent
+            # patient_id="ajay", the gateway quietly rewrote it to the session
+            # patient, and the model then reported the caller's OWN record back
+            # as "Ajay has no upcoming appointments. Would you like to book for
+            # him?" -- a confident statement about a third party, assembled
+            # from someone else's data, with every guardrail reporting clean.
+            #
+            # Nothing leaked, because the lookup only ever touched the caller's
+            # own record. The harm was the narration: correcting the action
+            # while leaving the model believing its version happened means the
+            # model describes an event that did not occur. A control that
+            # rewrites a request has to tell whoever it overruled, or it just
+            # moves the error from the data to the sentence.
+            if original_patient and original_patient != tool_args.get('patient_id'):
+                result = dict(result, identity_note=(
+                    f'This result is for {tool_args.get("patient_id")}, the authenticated '
+                    f'caller. It is NOT for "{original_patient}" -- you cannot look up '
+                    f'anyone else, and no data about them was returned. Do not describe '
+                    f'this result as belonging to anyone but the caller, and tell them '
+                    f'you can only access their own record.'
+                ))
+
+            record['executed'] = True
+            record['ok'] = bool(result.get('ok'))
             if result.get('ok') and tool_name in WRITE_TOOLS:
                 _record_activity(tool_name, session.id)
+
+            turn.step(
+                'execute',
+                f'{tool_name} ran against the hospital API'
+                + ('' if result.get('ok') else f' and failed: {result.get("error", "unknown")}'),
+                tool=tool_name,
+                ok=bool(result.get('ok')),
+            )
 
             session.messages.append(
                 {'role': 'tool', 'content': json.dumps(result), 'name': tool_name}
             )
 
     # Ran out of steps without the model settling on a reply.
+    turn.step(
+        'error',
+        f'model still calling tools after {settings.max_agent_steps} steps -- loop capped',
+    )
     turn.reply = (
         "I wasn't able to complete that. Let me put you through to someone at the front desk."
     )

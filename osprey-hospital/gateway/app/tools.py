@@ -30,9 +30,34 @@ WRITE_TOOLS = {
     'update_patient_record',
 }
 
-# Tools that touch a patient record at all (read or write). Gated too, because
-# reading someone else's appointments is a PHI leak.
-GATED_TOOLS = WRITE_TOOLS | {'lookup_appointments'}
+# Tools that are safe to run WITHOUT a verdict. Everything else is gated.
+#
+# This is an allowlist of exemptions, not an allowlist of what gets checked, and
+# the direction matters. It used to read
+#
+#     GATED_TOOLS = WRITE_TOOLS | {'lookup_appointments'}
+#
+# which meant a tool added later was ungated until somebody remembered to add
+# it -- a new capability arriving unsupervised by default. That is the same
+# shape as the booking bug in the README: a guard that enumerates what to
+# protect will eventually miss one. Enumerate the exemptions instead, because
+# forgetting to exempt something costs a redundant verdict, while forgetting to
+# gate something costs a patient.
+#
+# Both entries below touch no patient record: list_providers returns the public
+# clinician list, find_open_slots returns free/busy for a provider. Neither can
+# name a patient. Nothing else belongs here.
+UNGATED_READS = {
+    'list_providers',
+    'find_open_slots',
+}
+
+
+def is_gated(tool_name: str) -> bool:
+    """Every tool needs a verdict unless explicitly exempted -- including a tool
+    that does not exist, so a hallucinated tool name is denied rather than
+    quietly falling through to the executor's 'unknown tool' path."""
+    return tool_name not in UNGATED_READS
 
 
 TOOL_SCHEMAS: List[Dict[str, Any]] = [

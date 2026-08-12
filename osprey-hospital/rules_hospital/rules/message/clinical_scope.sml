@@ -13,6 +13,43 @@ Import(
 # blocked is the agent ANSWERING clinically instead of routing the question to
 # someone qualified.
 
+# --- The patient asked for a medical opinion ----------------------------------
+#
+# Denied at the point of asking, which is the only rule in this file that fires
+# before the model has said anything. Two reasons it is worth having on top of
+# the reply-side rules below:
+#
+#   1. Speed. Evaluated at the `input` stage, so the turn ends in ~15ms with a
+#      safe reply instead of waiting out two CPU completions. The gate was never
+#      the slow part; the model was, and this skips it entirely.
+#   2. Certainty. The reply-side rules depend on the model drafting something
+#      catchable. This one does not depend on the model at all -- it cannot be
+#      talked round, and it holds even on a turn where the model would have
+#      answered perfectly.
+#
+# It keys on the SHAPE of the request, never the symptom. "I've had a headache
+# for days, can I see someone?" must reach the booking flow untouched; only
+# "what should I take for this headache?" is refused. See
+# lists/advice_request_phrases.yaml.
+#
+# Not escalated. Someone asking a scheduling bot for advice is doing something
+# completely ordinary, and paging a human for it is how escalation queues become
+# noise nobody reads.
+
+ClinicalAdviceRequestedRule = Rule(
+  when_all=[
+    UserMessageRequestsAdvice,
+  ],
+  description=f'Patient asked for a medical opinion (matched: {UserMessageAdviceRequestTermStr})',
+)
+
+WhenRules(
+  rules_any=[ClinicalAdviceRequestedRule],
+  then=[
+    DeclareVerdict(verdict='deny:clinical_advice_request'),
+  ],
+)
+
 # --- The agent answered a clinical question -----------------------------------
 
 ClinicalAnswerRule = Rule(

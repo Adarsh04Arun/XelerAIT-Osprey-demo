@@ -33,8 +33,15 @@ Require(
   require_if=IsBookAppointment,
 )
 
-# Windowed abuse counters. Cheap, but no point running them on reads.
+# Windowed abuse counters for writes.
 Require(
   rule='rules/appointment/booking_churn.sml',
   require_if=IsBookAppointment or IsCancelAppointment,
+)
+
+# And for reads. Reads were uncounted until a review pointed out that the one
+# thing no write counter can see is a caller quietly reading a lot.
+Require(
+  rule='rules/appointment/record_access_rate.sml',
+  require_if=IsLookupAppointments,
 )

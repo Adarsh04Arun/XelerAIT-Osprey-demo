@@ -20,6 +20,8 @@ a variable in models/*.sml, then the rule.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 import time
 from collections import defaultdict, deque
@@ -171,7 +173,19 @@ def enrich_appointment(tool_args: Dict[str, Any], actor_id: Optional[str]) -> Di
     }
 
 
-def enrich_patient(tool_args: Dict[str, Any], actor_id: Optional[str]) -> Dict[str, Any]:
+def enrich_patient(
+    tool_args: Dict[str, Any],
+    actor_id: Optional[str],
+    model_patient_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Facts about the patient this call targets.
+
+    `model_patient_id` is what the MODEL asked for, before the gateway replaced
+    it with the session identity. It matters because the replacement happens
+    upstream of enrichment, so without carrying the original here the ruleset
+    can only ever see the corrected id -- and an attempt to act on another
+    patient becomes invisible to every rule written to catch exactly that.
+    """
     target_id = tool_args.get('patient_id') or actor_id
     patient = store.patients.get(target_id) if target_id else None
 
@@ -187,6 +201,80 @@ def enrich_patient(tool_args: Dict[str, Any], actor_id: Optional[str]) -> Dict[s
         # Is the chart being written the same person the gateway verified?
         'target_is_verified_actor': bool(actor_id) and target_id == actor_id,
         'target_id': target_id,
+        # What the model actually asked for, and whether the gateway had to
+        # overrule it. Surfaced so a rule can see the intent even though the
+        # action itself was already made safe.
+        'model_supplied_id': model_patient_id or '',
+        'identity_substituted': bool(
+            model_patient_id and actor_id and model_patient_id != actor_id
+        ),
+    }
+
+
+def call_fingerprint(tool_name: str, tool_args: Dict[str, Any]) -> str:
+    """A stable short hash of "this exact call with these exact arguments".
+
+    Rules cannot hash anything themselves -- they are pure comparisons over
+    JSON -- so the fingerprint is resolved here like every other fact, and
+    rules/duplicate_call.sml just counts how often the same one recurs.
+
+    Sorted keys so argument ordering from the model does not change the hash;
+    if it did, a model retrying the identical call with its JSON keys in a
+    different order would look like a brand new attempt, which is precisely the
+    case the breaker exists to catch.
+    """
+    if not tool_name:
+        return ''
+    payload = json.dumps({'t': tool_name, 'a': tool_args or {}}, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]
+
+
+# Strings models emit when they mean "I don't have a value". They arrive as
+# real strings, not JSON null, so nothing downstream treats them as missing:
+# a provider_id of "null" is looked up, not found, and denied as a hallucinated
+# clinician -- producing the rule text "Provider null does not exist", which is
+# true, useless, and hides the actual problem.
+_NULL_LIKE = {'', 'null', 'none', 'nil', 'nan', 'undefined', 'n/a', 'na',
+              'string', 'unknown', '<unknown>', '...'}
+
+
+def _is_null_like(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _NULL_LIKE
+    return False
+
+
+def enrich_call_shape(tool_name: str, tool_args: Dict[str, Any], actor_id: Optional[str]) -> Dict[str, Any]:
+    """Is this tool call substantive, or did the model fill every field with a
+    placeholder?
+
+    A real observed call:
+
+        book_appointment(provider_id="null", start="null", department="null")
+
+    Every downstream rule fires on that -- unknown provider, unparseable start,
+    outside clinic hours -- and all three are technically correct and
+    collectively unhelpful. Three denials describing the same non-event bury
+    the finding, which is that the model proposed a booking without having
+    decided anything about it.
+
+    patient_id is excluded from the count because the gateway injects it from
+    the session, so it is always populated and would make every call look like
+    it carried at least one real argument.
+    """
+    considered = {k: v for k, v in (tool_args or {}).items() if k != 'patient_id'}
+    null_like = sorted(k for k, v in considered.items() if _is_null_like(v))
+
+    return {
+        'arg_count': len(considered),
+        'null_like_args': null_like,
+        'null_like_count': len(null_like),
+        # False only when the model supplied arguments and every one of them was
+        # a placeholder. A tool that legitimately takes no arguments (or whose
+        # only argument is the injected patient_id) is not malformed.
+        'has_usable_args': len(considered) == 0 or len(null_like) < len(considered),
     }
 
 
@@ -205,6 +293,7 @@ def enrich(
     tool_args: Dict[str, Any],
     session_id: str,
     actor_id: Optional[str],
+    model_patient_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the `enrichment` block for one proposed action.
 
@@ -213,6 +302,14 @@ def enrich(
     """
     enrichment: Dict[str, Any] = {
         'session': enrich_session(session_id),
+        # Identity of this exact call, for the repeat-call breaker. Cheap enough
+        # to compute unconditionally, and computing it only for some tools would
+        # be the same enumerate-what-to-protect mistake that left booking
+        # ungated.
+        'call': dict(
+            enrich_call_shape(tool_name, tool_args, actor_id),
+            fingerprint=call_fingerprint(tool_name, tool_args),
+        ),
         'clinic': {
             'open_hour': settings.clinic_open_hour,
             'close_hour': settings.clinic_close_hour,
@@ -228,16 +325,22 @@ def enrich(
     if tool_name in ('reschedule_appointment', 'cancel_appointment', 'lookup_appointments'):
         enrichment['appointment'] = enrich_appointment(tool_args, actor_id)
 
-    # Booking is included here as well as the onboarding tools: creating an
-    # appointment writes against a patient id, so the rules need to know whether
-    # that id is the person we actually verified. Leaving booking out is what
-    # allowed appointments to be created for hallucinated patient ids.
-    if tool_name in (
-        'onboard_patient',
-        'update_patient_record',
-        'book_appointment',
-        'reschedule_appointment',
-    ):
-        enrichment['patient'] = enrich_patient(tool_args, actor_id)
+    # Every tool that names a patient, with no list to fall out of.
+    #
+    # This was an explicit tuple of four tool names, and lookup_appointments was
+    # missing from it -- so TargetIsVerifiedActor was never computed for a read,
+    # and pat-1001 could ask for pat-1002's appointments with no rule firing at
+    # all. The gateway's identity injection hid it in the /chat path, which is
+    # exactly why it survived: the hole was real and unreachable at the same
+    # time, so nothing failed.
+    #
+    # That is the second time this shape of bug has landed here. The first is
+    # written up in the README ("Booking was never identity-gated"), with the
+    # lesson "a guard that enumerates operations will eventually miss one" --
+    # and the fix at the time was to add booking to the list, which left the
+    # list. So: no list. If a tool takes a patient_id it gets patient
+    # enrichment, decided by the argument rather than by memory.
+    if 'patient_id' in (tool_args or {}) or tool_name in ('onboard_patient',):
+        enrichment['patient'] = enrich_patient(tool_args, actor_id, model_patient_id)
 
     return enrichment

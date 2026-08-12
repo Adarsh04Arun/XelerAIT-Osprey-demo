@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import agent as agent_mod
@@ -25,6 +25,7 @@ from .effector import apply_effects, audit_log, escalations
 from .enricher import enrich, sessions
 from .hospital import store
 from .osprey_gate import gate
+from .provenance import ruleset_version
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -92,10 +93,19 @@ class ChatResponse(BaseModel):
     session_id: str
     request_id: str
     blocked: bool
+    # True only when the patient-facing reply was replaced. `blocked` can be
+    # true while this is false: a denied tool call the model then explained is
+    # the healthy case, and labelling that reply "substituted" overstates what
+    # the gate did.
+    reply_substituted: bool = False
     escalated: bool
     escalation_reasons: List[str]
     tool_calls: List[Dict[str, Any]]
     decisions: List[Dict[str, Any]]
+    # Ordered trace of the turn: what the model proposed, what the gate said,
+    # what actually executed. `decisions` is the guardrail's view; this is the
+    # pipeline's. Consumed by the CLI to render the flow.
+    flow: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +115,27 @@ class ChatResponse(BaseModel):
 
 @app.post('/chat', response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    turn = agent_mod.handle_message(
-        message=req.message,
-        session_id=req.session_id,
-        actor_id=req.actor_id,
-        identity_verified=req.identity_verified,
-    )
+    try:
+        turn = agent_mod.handle_message(
+            message=req.message,
+            session_id=req.session_id,
+            actor_id=req.actor_id,
+            identity_verified=req.identity_verified,
+        )
+    except agent_mod.SessionIdentityMismatch as e:
+        # A session holds the whole conversation, so handing it to a different
+        # patient hands over the previous patient's PHI. Refused here rather
+        # than in the ruleset because the ruleset inspects tool arguments, and
+        # by then the wrong history is already in the model's context.
+        logger.warning('rejected session takeover: %s', e)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                'That session id is already in use by another patient. '
+                'Start a new session.'
+            ),
+        )
+
     apply_effects(turn, req.message)
 
     return ChatResponse(
@@ -118,10 +143,12 @@ def chat(req: ChatRequest) -> ChatResponse:
         session_id=turn.session_id,
         request_id=turn.request_id,
         blocked=turn.blocked,
+        reply_substituted=turn.reply_substituted,
         escalated=turn.escalated,
         escalation_reasons=list(dict.fromkeys(turn.escalation_reasons)),
         tool_calls=turn.tool_calls,
         decisions=turn.decisions,
+        flow=turn.flow,
     )
 
 
@@ -180,7 +207,11 @@ def get_audit(limit: int = 100) -> Dict[str, Any]:
 
 @app.get('/escalations')
 def get_escalations(limit: int = 100) -> Dict[str, Any]:
-    return {'escalations': escalations.items(limit)}
+    # `dropped` is reported even when zero. A queue that silently loses items is
+    # worse than one that overflows loudly, and the only way to know it happened
+    # is for the count to be somewhere a reader will see it. Critical-band items
+    # are never dropped -- see EscalationQueue.
+    return {'escalations': escalations.items(limit), 'dropped': escalations.dropped()}
 
 
 @app.get('/hospital/state')
@@ -249,6 +280,11 @@ def healthz() -> Dict[str, Any]:
     return {
         'status': 'ok',
         'model': settings.ollama_model,
+        # Content hash of rules_hospital/. Compare it against what the audit log
+        # recorded to confirm a decision was made under the ruleset currently
+        # on disk -- 'unavailable' means the gateway cannot see the directory
+        # and the audit trail is running without policy provenance.
+        'ruleset_version': ruleset_version(),
         'fail_open': settings.fail_open,
         'verdict_timeout_seconds': settings.verdict_timeout_seconds,
     }

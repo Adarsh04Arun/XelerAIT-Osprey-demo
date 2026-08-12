@@ -45,6 +45,33 @@ logger = logging.getLogger('hospital.gate')
 # ---------------------------------------------------------------------------
 
 
+# How denial reasons are ordered when they are read back to the model.
+#
+# Presentation only -- it changes nothing about what is denied, and every
+# verdict is still reported in full. Rules stay a flat set of independent
+# comparisons with no ordering between them, which is what makes them
+# individually testable; the ranking lives out here because it is a question
+# about explaining a decision, not about making one.
+#
+# Anything unlisted sits at 50, between the root causes and the details.
+_DENIAL_RANK = {
+    # Shape problems first: if the call was empty, nothing else is the reason.
+    'deny:malformed_tool_call': 0,
+    'deny:repeated_identical_call': 1,
+    # Then identity and permission, which no amount of retrying will fix.
+    'deny:identity_not_verified': 10,
+    'deny:cross_patient_access': 11,
+    'deny:cross_patient_booking': 11,
+    'deny:cross_patient_write': 11,
+    'deny:out_of_scope': 12,
+    # Then the specific, correctable scheduling facts.
+    'deny:unparseable_start': 60,
+    'deny:outside_clinic_hours': 61,
+    'deny:slot_does_not_exist': 62,
+    'deny:unknown_provider': 63,
+}
+
+
 @dataclass
 class Decision:
     """The outcome of running one proposed action through the ruleset."""
@@ -66,13 +93,22 @@ class Decision:
         Deduplicated: one rule that emits both a `deny:` and an `escalate:`
         verdict appears once per verdict, and repeating the same sentence back
         to the model just makes the correction noisier.
+
+        Ordered so the root cause leads. A call with placeholder arguments trips
+        every downstream rule at once -- unknown provider, unparseable time,
+        outside clinic hours -- and each is true while none names the actual
+        problem. Handing the model three contradictory corrections invites it to
+        fix one and resubmit; handing it "you filled every field with null"
+        first gives it something it can act on.
         """
         seen = [
-            r['description']
+            (str(r.get('verdict', '')), r['description'])
             for r in self.reasons
             if str(r.get('verdict', '')).startswith('deny:')
         ]
-        return list(dict.fromkeys(seen))
+        deduped = list(dict.fromkeys(seen))
+        ordered = sorted(deduped, key=lambda vd: _DENIAL_RANK.get(vd[0], 50))
+        return [description for _, description in ordered]
 
     @property
     def denial_codes(self) -> List[str]:

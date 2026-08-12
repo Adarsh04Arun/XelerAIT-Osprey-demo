@@ -33,7 +33,14 @@ class Settings:
 
     # --- Ollama --------------------------------------------------------------
     ollama_host: str = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-    ollama_model: str = os.environ.get('OLLAMA_MODEL', 'llama3.1:latest')
+
+    # PINNED, deliberately. `llama3.1:latest` is a floating tag: Ollama can
+    # resolve it to a different build after a `pull`, and the agent's behaviour
+    # changes with no code change on our side. Every claim in the README about
+    # what the model actually did was measured against 8b. Bump this on purpose,
+    # then run tests/test_agent_behaviour.py -- that suite exists to make a
+    # version bump safe rather than hopeful.
+    ollama_model: str = os.environ.get('OLLAMA_MODEL', 'llama3.1:8b')
     ollama_timeout_seconds: float = float(os.environ.get('OLLAMA_TIMEOUT', '120'))
 
     # Low temperature: this agent should be boring and repeatable. Raise it if

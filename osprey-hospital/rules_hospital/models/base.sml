@@ -120,6 +120,74 @@ TargetIsVerifiedActor: bool = JsonData(
 )
 
 # ---------------------------------------------------------------------------
+# Call identity
+# ---------------------------------------------------------------------------
+#
+# Hash of (tool_name, tool_args), resolved by the enricher because rules cannot
+# hash anything themselves. Used by rules/duplicate_call.sml to tell "the agent
+# is working through a problem" apart from "the agent is stuck repeating one
+# rejected call".
+CallFingerprint: str = JsonData(
+  path='$.enrichment.call.fingerprint',
+  coerce_type=True,
+  required=False,
+)
+
+CallFingerprintStr: str = ForceString(s=CallFingerprint, default='(none)')
+
+# Did the model actually decide anything, or fill every field with a
+# placeholder? See enrich_call_shape() in gateway/app/enricher.py.
+CallHasUsableArgs: bool = JsonData(
+  path='$.enrichment.call.has_usable_args',
+  coerce_type=True,
+  required=False,
+)
+
+CallNullLikeArgCount: int = JsonData(
+  path='$.enrichment.call.null_like_count',
+  coerce_type=True,
+  required=False,
+)
+
+# ToolName is declared non-optional, but "declared" and "true at runtime" are
+# different things, and a description that interpolates a None makes the whole
+# rule evaluate to null and fail OPEN. See the fourth bug in the README. Coerce
+# anything that reaches an f-string, without exception.
+ToolNameStr: str = ForceString(s=ToolName, default='(no tool)')
+
+# Lives here rather than in models/appointment.sml because ActorId is declared
+# here and rules outside the appointment tree need it -- patient_scope.sml is
+# attached to no operation and so imports no per-type model. Defining it in both
+# places is a duplicate-definition error, so this is the one copy.
+ActorIdStr: str = ForceString(s=ActorId, default='(anonymous)')
+
+# ---------------------------------------------------------------------------
+# What the model asked for, before the gateway overruled it
+# ---------------------------------------------------------------------------
+#
+# _apply_identity replaces patient_id with the authenticated session's before
+# enrichment runs, so every ownership rule sees the CORRECTED id and passes.
+# That is the right order -- the action must be made safe first -- but it means
+# the model's intent to act on someone else leaves no trace in the ruleset.
+#
+# Observed: "give ajay's info" produced patient_id="ajay", which the gateway
+# rewrote to the caller. Not one rule fired, because by the time the rules ran
+# there was nothing wrong to see.
+IdentitySubstituted: bool = JsonData(
+  path='$.enrichment.patient.identity_substituted',
+  coerce_type=True,
+  required=False,
+)
+
+ModelSuppliedPatientId: str = JsonData(
+  path='$.enrichment.patient.model_supplied_id',
+  coerce_type=True,
+  required=False,
+)
+
+ModelSuppliedPatientIdStr: str = ForceString(s=ModelSuppliedPatientId, default='(none)')
+
+# ---------------------------------------------------------------------------
 # Time constants (seconds), same convention as rules_atproto/models/base.sml
 # ---------------------------------------------------------------------------
 

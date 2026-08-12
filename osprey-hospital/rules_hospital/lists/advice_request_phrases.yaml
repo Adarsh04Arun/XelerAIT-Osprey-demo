@@ -1,0 +1,44 @@
+# The patient is asking for a medical OPINION, not an appointment
+# --- Asking what to take ------------------------------------------------------
+- "what should i take"
+- "what can i take"
+- "what do i take"
+- "should i take anything"
+- "what medication"
+- "which medication"
+- "do i need antibiotics"
+- "do i need medication"
+- "safe to take"
+# Bare "can i take" and "should i take" are deliberately absent: "can I take
+# the 3pm slot?" is a booking request, and matching it would refuse a patient
+# for asking to be seen. The `what`-prefixed forms have no such reading.
+
+# --- Asking for a diagnosis ---------------------------------------------------
+- "what's wrong with me"
+- "whats wrong with me"
+- "what do you think it is"
+- "what could it be"
+- "what might it be"
+- "what causes"
+- "why do i have"
+- "diagnose me"
+- "is this normal"
+
+# --- Asking for a severity judgement ------------------------------------------
+- "is it serious"
+- "is this serious"
+- "should i be worried"
+- "should i worry"
+- "how bad is"
+- "is it dangerous"
+
+# --- Asking for treatment -----------------------------------------------------
+- "how do i treat"
+- "how should i treat"
+- "how do i get rid of"
+- "what helps with"
+- "what's the best thing for"
+- "whats the best thing for"
+- "what would you recommend for"
+- "any advice for"
+- "medical advice"

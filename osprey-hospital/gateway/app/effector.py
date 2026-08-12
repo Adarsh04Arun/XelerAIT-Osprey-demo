@@ -22,6 +22,8 @@ from collections import deque
 from datetime import datetime
 from typing import Any, Deque, Dict, List
 
+from .provenance import stamp
+
 logger = logging.getLogger('hospital.effector')
 
 
@@ -89,10 +91,24 @@ class AuditLog:
 
 class EscalationQueue:
     """Turns that need a human. In production this pages the front desk or the
-    on-call clinician, depending on the reason."""
+    on-call clinician, depending on the reason.
+
+    Bounded, but not uniformly. `deque(maxlen=...)` evicts oldest-first and
+    ignores priority, which meant a self-harm escalation could be pushed out by
+    two hundred subsequent rate-limit alerts -- silently, with no log line and
+    no counter. The band exists precisely so that alert cannot queue behind
+    routine noise; letting the queue's eviction policy undo that at the far end
+    was the same bug wearing a different hat.
+
+    So `critical` is held in its own unbounded deque. If a hospital ever
+    generates enough suicidal disclosures to exhaust memory here, running out
+    of memory is the correct and least-bad outcome.
+    """
 
     def __init__(self, maxlen: int = 200) -> None:
         self._items: Deque[Dict[str, Any]] = deque(maxlen=maxlen)
+        self._critical: Deque[Dict[str, Any]] = deque()
+        self._dropped = 0
         self._lock = threading.Lock()
 
     # Three bands, not two. Self-harm sits above medical urgency: both need a
@@ -100,19 +116,38 @@ class EscalationQueue:
     # one alert among many.
     CRITICAL_REASONS = ('self_harm', 'self_harm_mishandled')
 
+    # Someone probing whether the controls are real belongs with PHI events:
+    # below a crisis, above routine noise. The attempt failing does not make it
+    # uninteresting -- what it tells you is about the caller, not the turn.
+    HIGH_REASONS = ('phi_boundary', 'injection_attempt', 'injection_mishandled')
+
     @classmethod
     def _priority(cls, reasons: List[str]) -> str:
         if any(r in cls.CRITICAL_REASONS for r in reasons):
             return 'critical'
-        if any(r.startswith('urgent') or r == 'phi_boundary' for r in reasons):
+        if any(r.startswith('urgent') or r in cls.HIGH_REASONS for r in reasons):
             return 'high'
         return 'normal'
 
     def add(self, item: Dict[str, Any]) -> None:
         item['raised_at'] = datetime.now().isoformat(timespec='seconds')
         item['priority'] = self._priority(item.get('reasons', []))
+
         with self._lock:
-            self._items.append(item)
+            if item['priority'] == 'critical':
+                self._critical.append(item)
+            else:
+                # Count what falls off the end. An escalation queue that loses
+                # items without saying so is worse than one that overflows
+                # loudly -- the whole point is that a human sees these.
+                if len(self._items) == self._items.maxlen:
+                    self._dropped += 1
+                    logger.error(
+                        'escalation queue full (%s) -- dropped the oldest non-critical '
+                        'item; %s dropped in total',
+                        self._items.maxlen, self._dropped,
+                    )
+                self._items.append(item)
 
         log = logger.critical if item['priority'] == 'critical' else logger.warning
         log(
@@ -124,15 +159,24 @@ class EscalationQueue:
 
     def items(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self._lock:
+            everything = list(self._critical) + list(self._items)
             ordered = sorted(
-                self._items,
+                everything,
                 key=lambda i: (self._RANK.get(i.get('priority', 'normal'), 2), i.get('raised_at', '')),
             )
         return ordered[:limit]
 
+    def dropped(self) -> int:
+        """Non-critical items lost to overflow. Surfaced by /escalations so the
+        queue cannot quietly under-report what needs a human."""
+        with self._lock:
+            return self._dropped
+
     def clear(self) -> None:
         with self._lock:
             self._items.clear()
+            self._critical.clear()
+            self._dropped = 0
 
 
 audit_log = AuditLog()
@@ -146,6 +190,11 @@ escalations = EscalationQueue()
 
 def apply_effects(turn: Any, user_message: str) -> None:
     """Write the audit trail and raise escalations for one completed turn."""
+    # What produced these decisions. Without it an audit row records the verdict
+    # but not the policy or the model that reached it, and six months later
+    # nobody can say whether a decision was correct under the rules of the day.
+    provenance = dict(stamp(), prompt_version=getattr(turn, 'prompt_version', ''))
+
     for decision in turn.decisions:
         audit_log.record(
             {
@@ -158,6 +207,7 @@ def apply_effects(turn: Any, user_message: str) -> None:
                 'rules_fired': [r.get('rule') for r in decision.get('reasons', [])],
                 'latency_ms': decision['latency_ms'],
                 'timed_out': decision['timed_out'],
+                **provenance,
             }
         )
 
@@ -169,6 +219,12 @@ def apply_effects(turn: Any, user_message: str) -> None:
                 'stage': 'tool_proposed',
                 'tool': call['name'],
                 'arguments': _redact_args(call.get('arguments', {})),
+                # Whether the proposal actually ran. A trail that logs what was
+                # attempted without logging what executed cannot distinguish a
+                # blocked booking from a completed one.
+                'executed': call.get('executed', False),
+                'blocked_by': call.get('blocked_by', []),
+                **provenance,
             }
         )
 
@@ -181,5 +237,31 @@ def apply_effects(turn: Any, user_message: str) -> None:
                 'user_message': redact(user_message),
                 'agent_reply': redact(turn.reply),
                 'tools_attempted': [c['name'] for c in turn.tool_calls],
+                # The rules in their own words, not just the reason codes.
+                # A reviewer woken at 2am gets "phi_boundary" otherwise, and has
+                # to go and read the ruleset to find out what that meant here.
+                'evidence': _evidence(turn),
+                **provenance,
             }
         )
+
+
+def _evidence(turn: Any) -> List[Dict[str, Any]]:
+    """Every rule that fired this turn, with the description it carries.
+
+    Deduplicated on (rule, description): one rule emitting both a `deny:` and an
+    `escalate:` verdict appears once per verdict in the decision payload, and
+    repeating the same sentence twice in a review item just makes it longer.
+    """
+    seen: Dict[tuple, Dict[str, Any]] = {}
+    for decision in turn.decisions:
+        for reason in decision.get('reasons', []):
+            key = (reason.get('rule'), reason.get('description'))
+            if key not in seen:
+                seen[key] = {
+                    'stage': decision['stage'],
+                    'rule': reason.get('rule'),
+                    'verdict': reason.get('verdict'),
+                    'description': redact(str(reason.get('description', ''))),
+                }
+    return list(seen.values())

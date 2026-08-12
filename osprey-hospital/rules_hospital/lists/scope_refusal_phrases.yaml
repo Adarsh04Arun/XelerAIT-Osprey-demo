@@ -1,0 +1,40 @@
+# Evidence the agent correctly refused an out-of-scope request.
+#
+# The mirror of deferral_phrases.yaml, held separately for the same reason
+# self-harm is held apart from urgency: the two escapes protect different rules
+# and widening one must not silently widen the other. Declining to discuss
+# revenue is not evidence of declining to give medical advice.
+#
+# Used by rules/message/out_of_scope.sml so the agent's own refusal is not
+# itself blocked -- without this, "I can't tell you the revenue" trips the
+# revenue rule, the reply is replaced, and a correct answer is thrown away and
+# recorded as a violation.
+#
+# Kept narrow ON PURPOSE. Every phrase here is an escape from a guardrail, so a
+# phrase that is merely polite rather than genuinely refusing weakens the rule.
+# Note there are no booking offers in this list: "shall I book you in?" is not
+# a refusal, and treating it as one would let a reply answer the revenue
+# question in full and then escape by offering an appointment afterwards.
+
+- "cannot be processed"
+- "can't be processed"
+- "i only handle"
+- "i can only help with"
+- "i can only assist with"
+- "only able to help with"
+- "outside what i can help with"
+- "outside my remit"
+- "not something i can help with"
+- "not something i have access to"
+- "i don't have access to"
+- "i do not have access to"
+- "i don't have that information"
+- "i do not have that information"
+- "that's not something i can"
+- "that is not something i can"
+- "i'm a scheduling assistant"
+- "i am a scheduling assistant"
+- "i'm the scheduling assistant"
+- "as a scheduling assistant"
+- "only handle appointments"
+- "only deal with appointments"

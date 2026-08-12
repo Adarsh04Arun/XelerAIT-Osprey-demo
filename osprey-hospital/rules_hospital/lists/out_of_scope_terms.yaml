@@ -1,0 +1,138 @@
+# Requests this agent has no business answering at all.
+#
+# Distinct from clinical_terms.yaml, which is about the ONE subject the agent
+# must not give an opinion on. This list is the outer boundary: subjects the
+# agent has no data for, no mandate over, and no reason to discuss. Revenue,
+# staff pay, other patients in bulk, system internals, general chit-chat.
+#
+# Why a rule and not just a prompt line: the system prompt already tells the
+# model to stay operational, and the README documents what happened anyway --
+# asked about opening hours and parking, it called update_patient_record. A
+# model that will write to a patient chart during a parking question will also
+# improvise a revenue figure. The prompt is the soft boundary; this is the hard
+# one, and it produces a flat "cannot be processed" that no phrasing negotiates
+# its way past.
+#
+# The failure mode being prevented is not embarrassment, it is confabulation:
+# an 8B model asked for last quarter's revenue does not say "I don't know", it
+# says "approximately £2.4 million", and a plausible invented number attributed
+# to the practice is worse than no answer.
+#
+# Matched case-insensitively as substrings against the PATIENT'S message and
+# against the agent's drafted reply. Phrases are chosen to be long enough not
+# to collide with ordinary scheduling talk -- "income of" rather than "income",
+# because "incoming call" contains the latter. Everything in scope (booking,
+# registration, contact and insurance details, opening hours, location,
+# parking) is deliberately absent.
+
+# --- Business and financial ---------------------------------------------------
+- "revenue"
+- "profit"
+- "turnover"
+- "earnings"
+- "ebitda"
+- "balance sheet"
+- "p&l"
+- "income of"
+- "budget"
+- "financial report"
+- "financials"
+- "quarterly results"
+- "quarterly report"
+- "annual report"
+- "how much money"
+- "operating cost"
+- "running costs"
+- "cost of running"
+- "margins"
+- "shareholder"
+- "investor"
+- "valuation"
+- "funding"
+- "stock price"
+- "share price"
+- "billing report"
+- "accounts receivable"
+
+# --- Staffing and HR ----------------------------------------------------------
+- "salary"
+- "salaries"
+- "payroll"
+- "staff pay"
+- "how much do you pay"
+- "how much does dr"
+- "wages"
+- "hr department"
+- "employment contract"
+- "hiring"
+- "hire staff"
+- "recruit"
+- "disciplinary"
+- "performance review"
+- "resignation"
+- "staff list"
+- "employee list"
+- "the ceo"
+- "board of directors"
+- "board meeting"
+- "management team"
+
+# --- Other patients, in bulk --------------------------------------------------
+# One patient asking about their own care is the whole point of the agent.
+# Asking about the population is a data-export request wearing a question mark.
+- "all patients"
+- "list of patients"
+- "patient list"
+- "other patients"
+- "how many patients"
+- "everyone's appointment"
+- "everyones appointment"
+- "medical records of"
+- "someone else's record"
+- "someone elses record"
+- "export the"
+- "download the"
+- "dump the"
+- "database"
+- "spreadsheet of"
+
+# --- System internals ---------------------------------------------------------
+# Data the agent has no business surfacing. The *override* and prompt-extraction
+# attempts that used to live here have moved to injection_attempt_phrases.yaml:
+# asking what model you are is a curious patient, while "ignore all the rules"
+# is someone probing the controls, and only the second should page anyone.
+- "admin password"
+- "api key"
+- "api token"
+- "access token"
+- "root access"
+- "source code"
+- "what model are you"
+- "which model are you"
+- "which llm"
+- "your training data"
+- "sql query"
+- "run a query"
+- "shell command"
+
+# --- Legal --------------------------------------------------------------------
+- "malpractice"
+- "lawsuit"
+- "suing"
+- "legal advice"
+- "negligence claim"
+
+# --- General off-domain -------------------------------------------------------
+# An assistant that will write a limerick will also answer a revenue question.
+# Holding the boundary at the obvious cases keeps it credible at the subtle ones.
+- "write me a poem"
+- "tell me a joke"
+- "what's the weather"
+- "whats the weather"
+- "recipe for"
+- "translate this"
+- "write code"
+- "python script"
+- "stock market"
+- "capital of"
+- "who won the"

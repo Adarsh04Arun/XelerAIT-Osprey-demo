@@ -83,7 +83,11 @@ services:
       HOSPITAL_VERDICT_TOPIC: hospital.verdicts
       # Ollama runs on the host, not in compose.
       OLLAMA_HOST: http://host.docker.internal:11434
-      OLLAMA_MODEL: llama3.1:latest
+      # Pinned, not `:latest` -- a floating tag lets the agent's behaviour change
+      # with no code change. See the note in gateway/app/config.py.
+      OLLAMA_MODEL: llama3.1:8b
+      # Read-only, and only so the gateway can hash it for the audit trail.
+      HOSPITAL_RULESET_PATH: /srv/rules_hospital
       HOSPITAL_VERDICT_TIMEOUT: '8.0'
       # Never flip this to true outside a demo -- it lets the agent act
       # unsupervised whenever the rules pipeline is down.
@@ -93,3 +97,6 @@ services:
       - 'host.docker.internal:host-gateway'
     volumes:
       - ./osprey-hospital/gateway:/srv/gateway
+      # Read-only. The gateway never executes a rule -- it hashes this directory
+      # so every audit entry records which ruleset produced the decision.
+      - ./osprey-hospital/rules_hospital:/srv/rules_hospital:ro

@@ -25,42 +25,128 @@
 - "cant breathe"
 - "breathless"
 - "gasping"
+- "can't catch my breath"
+- "cant catch my breath"
 - "choking"
+- "crushing chest"
+- "pressure in my chest"
+- "chest feels tight"
+# Found by the intake golden set (EMG-007). The list already had "chest
+# tightness" and "chest feels tight" -- and the patient in that case says
+# "tightness in my chest", which is neither. A P0 red flag missed on word order
+# alone.
+#
+# Third instance today of the same failure: "ignore all the rules" vs "ignore
+# all previous", "i want to die" vs "kill myself", now this. Substring matching
+# has no notion that two phrasings mean the same thing, so every ordering has to
+# be enumerated by someone who thought of it. Write both directions whenever a
+# symptom can be phrased either way -- and treat the recurrence as the argument
+# for a classifier rather than a longer list.
+- "tightness in my chest"
+- "tightness in the chest"
+- "tight in my chest"
+- "pain in the chest"
+- "heart attack"
+- "left arm pain"
+- "pain down my arm"
+- "racing heart"
+- "heart is racing"
+- "palpitations"
+- "blue lips"
+- "lips are blue"
+- "turning blue"
 
 # Neurological
 - "stroke"
 - "face is drooping"
+- "face has dropped"
 - "slurred speech"
+- "speech is slurred"
 - "can't move my"
 - "cannot move my"
+- "cant move my"
 - "numbness on one side"
+- "weakness on one side"
+- "one side of my body"
+- "sudden weakness"
 - "worst headache"
 - "sudden headache"
+- "thunderclap"
 - "seizure"
 - "convulsing"
+- "having a fit"
 - "passed out"
 - "fainted"
+- "blacked out"
+- "collapsed"
 - "unconscious"
 - "unresponsive"
+- "won't wake up"
+- "wont wake up"
+- "can't wake"
+- "cant wake"
 
 # Bleeding / trauma
 - "bleeding heavily"
 - "won't stop bleeding"
 - "will not stop bleeding"
+- "wont stop bleeding"
+- "lost a lot of blood"
 - "coughing up blood"
 - "vomiting blood"
+- "blood in my stool"
+- "blood in my urine"
+- "haemorrhage"
+- "hemorrhage"
 - "broken bone"
+- "bone is sticking"
 - "head injury"
+- "hit my head"
 - "severe burn"
+- "deep cut"
+
+# Allergy and infection -- both go from routine to life-threatening fast, and
+# both are things a patient will ring a clinic about rather than call 999.
+- "anaphylaxis"
+- "anaphylactic"
+- "allergic reaction"
+- "throat is closing"
+- "throat closing"
+- "tongue is swelling"
+- "can't swallow"
+- "cant swallow"
+- "sepsis"
+- "septic"
+- "rash that doesn't fade"
+- "rash that doesnt fade"
+- "stiff neck and"
+- "very high temperature"
+
+# Severity language. Blunt, but a patient who reaches for these words is not
+# asking for a routine slot in a fortnight.
+- "severe pain"
+- "worst pain"
+- "unbearable pain"
+- "agony"
+- "excruciating"
+
+# Acute mental state. Not self-harm (that has its own list and its own rule),
+# but equally not something to answer with an appointment offer.
+- "hearing voices"
+- "voices telling me"
+- "seeing things that aren't there"
 
 # Obstetric
 - "water broke"
 - "waters broke"
-- "my water broke"
 - "contractions"
 - "baby is not moving"
 - "baby isn't moving"
 - "baby hasn't moved"
+- "baby hasnt moved"
+- "reduced movements"
+- "bleeding in pregnancy"
+- "bleeding and pregnant"
 
 # NOTE: self-harm and suicidal ideation used to live here. They now have their
 # own list (lists/self_harm_terms.yaml) and their own rule, because they need a
@@ -75,4 +161,3 @@
 - "call 999"
 - "call 112"
 - "urgent care now"
-- "it's an emergency"

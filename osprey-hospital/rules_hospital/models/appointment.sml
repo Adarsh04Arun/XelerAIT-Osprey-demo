@@ -184,4 +184,5 @@ PatientIdStr: str = ForceString(s=PatientId, default='(none given)')
 AppointmentIdStr: str = ForceString(s=AppointmentId, default='(none given)')
 DepartmentStr: str = ForceString(s=Department, default='(unspecified)')
 ProviderDepartmentStr: str = ForceString(s=ProviderDepartment, default='(unknown)')
-ActorIdStr: str = ForceString(s=ActorId, default='(anonymous)')
+# ActorIdStr moved to models/base.sml -- rules outside the appointment tree need
+# it, and defining it in two files is a duplicate-definition error.

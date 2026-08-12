@@ -20,27 +20,47 @@
 # will not always be caught by keywords. A production system needs an intent
 # classifier here; keep the list as a cheap high-recall pre-filter in front of it.
 
+# A note on what is NOT here, because it matters as much as what is.
+#
+# Bare "kill", "dead", "die" and "cuts" are all deliberately absent. English is
+# full of them: "this will kill my whole afternoon", "I'm dead busy that day",
+# "the parking is death by a thousand cuts". tests/test_guardrails.py pins
+# exactly those three phrasings in test_self_harm_list_does_not_fire_on_idiom.
+# Over-triggering is the right bias for this list, but a list that fires on
+# every scheduling complaint gets switched off within a week, and a guardrail
+# nobody leaves enabled protects nobody. Every entry below carries a first
+# person subject or an unambiguous object for that reason.
+
 # Direct statements of wanting to die
 - "want to die"
 - "wanna die"
+- "want to be dead"
 - "wish i was dead"
 - "wish i were dead"
+- "wish i could die"
+- "wish i would die"
 - "wish i was never born"
 - "rather be dead"
 - "better off dead"
 - "ready to die"
 - "going to die tonight"
+- "don't want to wake up"
+- "dont want to wake up"
+- "hope i don't wake up"
+- "hope i dont wake up"
 
 # Suicide, explicit
 - "kill myself"
 - "killing myself"
+- "killed myself"
 - "end my life"
 - "ending my life"
 - "take my own life"
-- "commit suicide"
+- "taking my own life"
 - "suicide"
 - "suicidal"
 - "end it all"
+- "ending it all"
 - "end things"
 - "not be here anymore"
 - "not want to be here"
@@ -48,23 +68,59 @@
 - "dont want to be here"
 - "don't want to live"
 - "dont want to live"
+- "don't want to be alive"
+- "dont want to be alive"
 - "can't go on"
 - "cant go on"
 - "can't do this anymore"
 - "cant do this anymore"
+- "can't keep going"
+- "cant keep going"
+- "can't cope anymore"
+- "cant cope anymore"
 - "no reason to live"
 - "no point in living"
+- "not worth living"
+- "nothing to live for"
+- "tired of living"
+- "sick of living"
+- "done with life"
+- "give up on life"
+- "no way out"
+- "can't see a way out"
+- "cant see a way out"
 - "what's the point anymore"
 - "whats the point anymore"
+
+# Method and planning. Presence of a method is the single strongest escalation
+# signal in any triage protocol, so these are listed even though each is rare.
+- "hang myself"
+- "hanging myself"
+- "jump off"
+- "jump in front of"
+- "in front of a train"
+- "slit my"
+- "cut my wrists"
+- "cutting my wrists"
+- "shoot myself"
+- "poison myself"
+- "planning to end"
+- "made a plan to"
 
 # Self-injury
 - "hurt myself"
 - "harm myself"
 - "hurting myself"
+- "harming myself"
 - "self harm"
 - "self-harm"
+- "self injure"
+- "self-injure"
 - "cut myself"
 - "cutting myself"
+- "burn myself"
+- "burning myself"
+- "hate myself"
 
 # Overdose / means
 - "overdose"
@@ -73,9 +129,22 @@
 - "took all my"
 - "swallowed a bottle"
 - "whole bottle of"
+- "handful of pills"
+- "load of pills"
+- "all my tablets"
+- "all my pills"
 
-# Others at risk
+# Others at risk, and the burden framing -- often the only thing said out loud,
+# and easy to read as ordinary self-deprecation if you are not looking for it.
 - "better off without me"
 - "everyone would be better off"
 - "burden to everyone"
+- "burden to my family"
 - "no one would miss me"
+- "nobody would miss me"
+- "no one would notice"
+- "if i wasn't here"
+- "if i wasnt here"
+- "if i wasn't around"
+- "if i wasnt around"
+- "if i was gone"
